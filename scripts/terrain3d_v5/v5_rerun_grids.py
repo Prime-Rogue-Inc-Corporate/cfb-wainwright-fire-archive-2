@@ -6,8 +6,8 @@ import os, sys, json, time
 O = os.path.dirname(os.path.abspath(__file__))
 os.environ["V5_SCRATCH"] = O + "/v5scratch"; os.makedirs(O + "/v5scratch", exist_ok=True)
 os.environ["NUMBA_CACHE_DIR"] = O + "/v5scratch/numba_cache"
-R2 = "/home/claude/cfb-wainwright-fire-archive-2"
-os.environ["CFB_ARCHIVE_1"] = "/home/claude/cfb-wainwright-fire-archive"
+R2 = os.path.abspath(os.environ.get("CFB_ARCHIVE_2", os.path.join(os.path.dirname(os.path.abspath(__file__)), "../..")))   # part 2 checkout
+os.environ.setdefault("CFB_ARCHIVE_1", os.path.join(R2, "../cfb-wainwright-fire-archive"))   # part 1 checkout
 sys.path.insert(0, R2 + "/scripts/rubicon_ridge/model_v5")
 import numpy as np, pandas as pd, rasterio
 from rasterio.warp import reproject, Resampling

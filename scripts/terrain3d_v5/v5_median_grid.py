@@ -4,7 +4,7 @@ import os, sys, json, glob
 import numpy as np, pandas as pd
 from pyproj import Transformer
 O = os.path.dirname(os.path.abspath(__file__))
-R2 = "/home/claude/cfb-wainwright-fire-archive-2"
+R2 = os.path.abspath(os.environ.get("CFB_ARCHIVE_2", os.path.join(os.path.dirname(os.path.abspath(__file__)), "../..")))   # part 2 checkout
 meta = json.load(open(O + "/grid_meta.json"))
 names, grids = [], []
 for f in sorted(glob.glob(O + "/grids_*.npz")):

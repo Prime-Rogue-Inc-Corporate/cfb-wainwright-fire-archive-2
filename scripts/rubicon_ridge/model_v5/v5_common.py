@@ -14,7 +14,8 @@ What is new here:
 """
 import os, math, json
 import numpy as np
-os.environ.setdefault("NUMBA_CACHE_DIR", os.path.join(os.environ.get("V5_SCRATCH", "/tmp/claude-0/-home-claude/11d4f8cb-573a-58d8-9723-d23e8fe40496/scratchpad/v5"), "numba_cache"))
+_DEFAULT_SCRATCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../_v5_scratch")   # set V5_SCRATCH to override
+os.environ.setdefault("NUMBA_CACHE_DIR", os.path.join(os.environ.get("V5_SCRATCH", _DEFAULT_SCRATCH), "numba_cache"))
 import numba as nb
 import heapq
 
@@ -24,7 +25,7 @@ REPO = os.path.abspath(os.path.join(HERE, "../../.."))
 # Set CFB_ARCHIVE_1 to its checkout; default assumes it sits next to this repository.
 V4REPO = os.path.abspath(os.environ.get("CFB_ARCHIVE_1", os.path.join(REPO, "../cfb-wainwright-fire-archive")))
 OUT = os.path.join(REPO, "data/rubicon-ridge/model_v5")
-SCRATCH = os.environ.get("V5_SCRATCH", "/tmp/claude-0/-home-claude/11d4f8cb-573a-58d8-9723-d23e8fe40496/scratchpad/v5")
+SCRATCH = os.path.abspath(os.environ.get("V5_SCRATCH", _DEFAULT_SCRATCH)); os.makedirs(SCRATCH, exist_ok=True)
 DEFAULT_SCAR = os.path.join(V4REPO, "data/infrastructure/scar_patches_revised.geojson")
 SPRING_BURN = os.path.join(V4REPO, "data/fuel/burn_2026-04-20_pda2.geojson")
 FIRE_LONLAT = (-110.9052, 52.7645)     # fire centre used by the Rubicon Ridge data pull (front-plane origin)
