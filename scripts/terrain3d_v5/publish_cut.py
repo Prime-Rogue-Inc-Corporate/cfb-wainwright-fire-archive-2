@@ -8,7 +8,10 @@ Usage: python3 publish_cut.py PART1_ROOT T3_DRAFT.mp4 OUT.mp4 ["PUBLICATION DATE
 import sys, os, subprocess, math
 import numpy as np, cv2
 from PIL import Image, ImageDraw, ImageFont
-P1, SRC, OUT = sys.argv[1:4]; PUB = sys.argv[4] if len(sys.argv) > 4 else ""
+P1, SRC, OUT = sys.argv[1:4]; PUB = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else ""
+MUSIC = os.environ.get("MUSIC")          # optional: lament audio; the film is stretched to its length
+M_IN, M_OUT = float(os.environ.get("M_IN", 27.8)), float(os.environ.get("M_OUT", 215.5))   # music section of the file (s)
+TITLE_S, M_LEAD, TAIL = 6.0, 1.0, 2.5
 F = "/usr/share/fonts/opentype/inter/"
 f_ = lambda n, s: ImageFont.truetype(F + n, int(s))
 B = lambda s: f_("Inter-Bold.otf", s); M = lambda s: f_("Inter-Medium.otf", s); R = lambda s: f_("Inter-Regular.otf", s)
@@ -22,6 +25,14 @@ W, H, FPS = 1920, 1080, 24
 SEG = [(0, 4, 1.6), (4, 6, 1.3), (6, 9.5, 1.5), (9.5, 11.5, 1.3), (11.5, 15, 1.6), (15, 17.5, 1.6), (17.5, 21, 1.7),
        (21, 25.7, 1.5), (25.7, 29.2, 1.8), (29.2, 31.7, 1.6), (31.7, 35.2, 1.8), (35.2, 36.7, 1.3), (36.7, 58.7, 1.55),
        (58.7, 60.2, 1.3), (60.2, 63.2, 1.6), (63.2, 67.04, 2.2)]
+MOVES = {1, 3, 11, 13}   # camera moves: keep near their own pace
+END_S = 9.0
+if MUSIC:   # stretch the static and clock segments so title + film + end card = the lament (music starts M_LEAD s in)
+    total = M_LEAD + (M_OUT - M_IN) + TAIL; END_S = 16.0
+    film = total - TITLE_S - END_S - 3 * 14 / 24 - 12 / 24
+    fixed = sum((b - a) * k for i, (a, b, k) in enumerate(SEG) if i in MOVES); var = sum((b - a) * k for i, (a, b, k) in enumerate(SEG) if i not in MOVES)
+    sc = (film - fixed) / var; SEG = [(a, b, k if i in MOVES else k * sc) for i, (a, b, k) in enumerate(SEG)]
+    print(f"stretch x{sc:.2f} on static segments, film {film:.1f} s, total {total:.1f} s")
 knots_out, knots_src = [0.0], [0.0]
 for a, b, k in SEG: knots_out.append(knots_out[-1] + (b - a) * k); knots_src.append(b)
 DUR = knots_out[-1]
@@ -61,6 +72,8 @@ def end(im, d):
          ("The figures", "Representative only. DND has not said where the soldiers were. No individual is placed or described."),
          ("", "They fade as the fire reaches the range area: the model can't show what happened to anyone."),
          ("The scenarios", "Leaving Range 2 at 3:28, 3:33 or 3:38 and the share of runs that got clear: modelled scenarios, not what happened."),
+         ("Music", "\"The Lament - Flowers of the Forest\", performed by Cpl Timothy Reid, Royal Canadian Air Force Pipes and Drums."),
+         ("", "Canadian Armed Forces, 2021. Crown copyright, reproduced with credit, unaltered except for length and level."),
          ("Sources", "Landsat 8, VIIRS, Sentinel-2 (contains modified Copernicus Sentinel data, 2026), ECCC, Alberta ACIS, PurpleAir,"),
          ("", "NRCan MRDEM-30 terrain, CFB Wainwright Range Standing Orders (2024).")]
     y = 185
@@ -138,7 +151,7 @@ def emit(a, n=1):
 def fade(a, b, n):
     for k in range(n): q = (k + 1) / (n + 1); emit(a * (1 - q) + b * q)
 black = np.zeros((H, W, 3), np.uint8)
-T = card(title); fade(black, T, 12); emit(T, int(5.0 * FPS))
+T = card(title); fade(black, T, 12); emit(T, int((TITLE_S - 1.0) * FPS))
 cap0 = cv2.VideoCapture(SRC); cap0.set(cv2.CAP_PROP_POS_FRAMES, int(46.0 * cap0.get(cv2.CAP_PROP_FPS))); _ok, _f = cap0.read()
 M0 = cv2.dilate(figure_mask(cv2.cvtColor(_f, cv2.COLOR_BGR2RGB), BOX_C), np.ones((5, 5), np.uint8)); cap0.release()
 cap = cv2.VideoCapture(SRC); NSRC = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)); SFPS = cap.get(cv2.CAP_PROP_FPS)
@@ -165,5 +178,12 @@ for j in range(nout):
         fr = a * (1 - q) + b * q
     if first is None: first = fr; fade(T.astype(np.float32), fr, 14)
     emit(fr); last = fr
-E = card(end); fade(last, E.astype(np.float32), 14); emit(E, int(9.0 * FPS)); fade(E.astype(np.float32), black, 12)
+E = card(end); fade(last, E.astype(np.float32), 14); emit(E, int(END_S * FPS)); fade(E.astype(np.float32), black, 12)
 w.close(); out.wait(); print("wrote", OUT, f"{DUR:.1f} s of film + cards")
+if MUSIC:   # lay the lament under the film: music from M_LEAD s, loudness-normalized, gentle fade at the end
+    tmp = OUT[:-4] + "_silent.mp4"; os.replace(OUT, tmp)
+    af = (f"atrim={M_IN}:{M_OUT},asetpts=PTS-STARTPTS,afade=t=in:d=0.8,afade=t=out:st={M_OUT - M_IN - 4}:d=4,"
+          f"loudnorm=I=-18:TP=-1.5:LRA=11,adelay={int(M_LEAD * 1000)}|{int(M_LEAD * 1000)},apad")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp, "-i", MUSIC, "-filter_complex", f"[1:a]{af}[a]", "-map", "0:v", "-map", "[a]",
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", OUT], check=True)
+    os.remove(tmp); print("music added")
