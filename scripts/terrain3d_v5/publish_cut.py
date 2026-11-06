@@ -59,6 +59,7 @@ def end(im, d):
          ("The clock", "The gust reached the base weather station at 3:16 p.m.; the fitted front reached the fire at about 3:28."),
          ("", "The fire reached the official Range 2 grid at about 3:39 and Range 15 / the road head at about 3:42 (10-90%: 3:34-3:58)."),
          ("The figures", "Representative only. DND has not said where the soldiers were. No individual is placed or described."),
+         ("", "They fade as the fire reaches the range area: the model can't show what happened to anyone."),
          ("The scenarios", "Leaving Range 2 at 3:28, 3:33 or 3:38 and the share of runs that got clear: modelled scenarios, not what happened."),
          ("Sources", "Landsat 8, VIIRS, Sentinel-2 (contains modified Copernicus Sentinel data, 2026), ECCC, Alberta ACIS, PurpleAir,"),
          ("", "NRCan MRDEM-30 terrain, CFB Wainwright Range Standing Orders (2024).")]
@@ -72,6 +73,62 @@ def end(im, d):
     d.text((90, H - 60), "PRIME ROGUE", font=K(38), fill=GOLD)
     im.paste(LOGO.resize((150, 150)), (W - 230, H - 185))
 
+
+# ---- the figures at Range 2: when the fire reaches them they fade under a smoke veil instead of standing in the flames
+# (the model can't show what happened to anyone). Draft-time schedule from story.py's shot C tmap: 3:39 = 49.4 s, 3:42 = 53.1 s.
+BOX_C = (868, 428, 1046, 592); BOX_B = (885, 296, 982, 394); BOX_T = (860, 260, 1050, 600)
+T_VEIL0, T_FADE0, T_FADE1, T_VEIL1, T_C_END, T_B = 48.6, 49.4, 52.2, 57.5, 58.7, 60.2
+rng = np.random.default_rng(7); NOISE = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), 18); NOISE = (NOISE - NOISE.min()) / (NOISE.max() - NOISE.min())
+def box_at(t):
+    return BOX_C if t <= T_C_END else (BOX_B if t >= T_B else BOX_T)
+M0 = None   # static mask of the group in shot C (camera holds still), taken from a pre-fire frame
+def white_mask(a):
+    return cv2.dilate((a.min(2) >= 237).astype(np.uint8), np.ones((5, 5), np.uint8))
+def figure_mask(a, box, lo=115):
+    x0, y0, x1, y1 = box; sub = a[y0:y1, x0:x1].astype(np.int16)
+    mx, mn = sub.max(2), sub.min(2)
+    m = ((mx >= lo) & (mx <= 236) & ((mx - mn) < 42)).astype(np.uint8)
+    white = cv2.dilate((mn >= 237).astype(np.uint8), np.ones((5, 5), np.uint8))   # dots, the scenario walker, label text
+    m = cv2.dilate(m, np.ones((3, 3), np.uint8)) & (1 - white)
+    if box == BOX_C: m[int(545 - y0):, int(1022 - x0):] = 0                          # keep the "Range 15 / road head" label
+    full = np.zeros(a.shape[:2], np.uint8); full[y0:y1, x0:x1] = m; return full
+def box_mask(shape, box):
+    z = np.zeros(shape[:2], np.uint8); x0, y0, x1, y1 = box; z[y0:y1, x0:x1] = 1; return z
+def figfix(a, t):
+    """a: RGB uint8 frame of the draft at draft time t (s). Returns the frame with the Range 2 figures faded and veiled."""
+    if t < T_VEIL0: return a
+    out = a.copy()
+    if t >= T_FADE0:
+        box = box_at(t)
+        if t <= T_C_END: m = cv2.dilate(M0, np.ones((3, 3), np.uint8)) & (1 - white_mask(a))
+        else: m = figure_mask(a, box, lo=85)
+        if m.any():
+            ai = a.astype(np.int16); line = ((ai[..., 0] - np.maximum(ai[..., 1], ai[..., 2]) > 70) & (box_mask(a.shape, box) > 0)).astype(np.uint8)
+            line = cv2.dilate(line, np.ones((3, 3), np.uint8))           # the red/amber scenario line: keep it, and don't let it bleed
+            clean = cv2.inpaint(a, (m | line).astype(np.uint8), 5, cv2.INPAINT_TELEA)
+            clean[line > 0] = a[line > 0]
+            k = min(1.0, (t - T_FADE0) / (T_FADE1 - T_FADE0)); k = k * k * (3 - 2 * k)
+            mm = cv2.GaussianBlur(m.astype(np.float32), (0, 0), 1.2)[..., None] * k
+            out = (a * (1 - mm) + clean * mm).astype(np.uint8)
+    if t < T_VEIL1 and t <= T_C_END:
+        up = min(1.0, (t - T_VEIL0) / 1.6); down = max(0.0, min(1.0, (T_VEIL1 - t) / 2.5)); amp = 0.62 * min(up, down)
+        cx, cy = 955 + (t - T_VEIL0) * 6, 492 - (t - T_VEIL0) * 2.5
+        yy, xx = np.ogrid[:H, :W]
+        g = np.exp(-(((xx - cx) / 120.0) ** 2 + ((yy - cy) / 78.0) ** 2))
+        alpha = (amp * g * (0.55 + 0.45 * np.roll(NOISE, int(t * 30), axis=1)))[..., None]
+        out = (out * (1 - alpha) + np.array([118, 110, 102], np.float32) * alpha).astype(np.uint8)
+    return out
+CAPTION = ("The fire reaches the range area at about 3:39 to 3:42. The model can't show what happened to each person.",
+           "Officials said four soldiers died and 39 were taken to hospital, 19 in critical condition.")
+def caption_box(im, t):
+    if not (50.6 <= t <= T_C_END): return
+    k = min(1.0, (t - 50.6) / 0.8, (T_C_END - t) / 0.6)
+    ov = Image.new("RGBA", im.size, (0, 0, 0, 0)); d = ImageDraw.Draw(ov)
+    d.rounded_rectangle([36, H - 196, 1330, H - 98], radius=10, fill=FILM_INK + (int(225 * k),))
+    d.text((60, H - 182), CAPTION[0], font=M(25), fill=(255, 255, 255, int(255 * k)))
+    d.text((60, H - 140), CAPTION[1], font=M(25), fill=(255, 214, 120, int(255 * k)))
+    im.paste(Image.alpha_composite(im.convert("RGBA"), ov).convert("RGB"))
+
 def pipe_out(path):
     return subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
                              "-c:v", "libx264", "-preset", "medium", "-crf", "19", "-pix_fmt", "yuv420p", "-movflags", "+faststart", path], stdin=subprocess.PIPE)
@@ -82,6 +139,8 @@ def fade(a, b, n):
     for k in range(n): q = (k + 1) / (n + 1); emit(a * (1 - q) + b * q)
 black = np.zeros((H, W, 3), np.uint8)
 T = card(title); fade(black, T, 12); emit(T, int(5.0 * FPS))
+cap0 = cv2.VideoCapture(SRC); cap0.set(cv2.CAP_PROP_POS_FRAMES, int(46.0 * cap0.get(cv2.CAP_PROP_FPS))); _ok, _f = cap0.read()
+M0 = cv2.dilate(figure_mask(cv2.cvtColor(_f, cv2.COLOR_BGR2RGB), BOX_C), np.ones((5, 5), np.uint8)); cap0.release()
 cap = cv2.VideoCapture(SRC); NSRC = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)); SFPS = cap.get(cv2.CAP_PROP_FPS)
 buf = {}; cur = -1
 def get(i):
@@ -90,14 +149,20 @@ def get(i):
     while cur < i:
         ok, fr = cap.read(); cur += 1
         if not ok: buf[cur] = buf[cur - 1]; continue
-        im = Image.fromarray(cv2.cvtColor(fr, cv2.COLOR_BGR2RGB)); header_fix(im); footer_fix(im); buf[cur] = np.asarray(im, np.float32)
+        td = cur / SFPS; im = Image.fromarray(figfix(cv2.cvtColor(fr, cv2.COLOR_BGR2RGB), td)); header_fix(im); footer_fix(im); caption_box(im, td); buf[cur] = np.asarray(im, np.float32)
         for k in [k for k in buf if k < cur - 2]: del buf[k]
     return buf[i]
-nout = int(DUR * FPS); first = last = None
+nout = int(DUR * FPS); first = last = None; CLAST = None
 for j in range(nout):
-    ts = float(np.interp(j / FPS, knots_out, knots_src)) * SFPS; i0 = int(ts); q = ts - i0
-    a = get(i0); b = get(i0 + 1) if q > 1e-3 else a
-    fr = a * (1 - q) + b * q
+    tsec = float(np.interp(j / FPS, knots_out, knots_src))
+    if T_C_END - 0.05 < tsec < T_B + 0.05:
+        if CLAST is None: CLAST = get(int((T_C_END - 0.05) * SFPS)).copy()
+        q = (tsec - (T_C_END - 0.05)) / (T_B + 0.1 - T_C_END); q = q * q * (3 - 2 * q)
+        fr = CLAST * (1 - q) + get(int((T_B + 0.05) * SFPS)) * q
+    else:
+        ts = tsec * SFPS; i0 = int(ts); q = ts - i0
+        a = get(i0); b = get(i0 + 1) if q > 1e-3 else a
+        fr = a * (1 - q) + b * q
     if first is None: first = fr; fade(T.astype(np.float32), fr, 14)
     emit(fr); last = fr
 E = card(end); fade(last, E.astype(np.float32), 14); emit(E, int(9.0 * FPS)); fade(E.astype(np.float32), black, 12)
