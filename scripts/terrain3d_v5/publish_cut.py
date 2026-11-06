@@ -3,13 +3,18 @@ The base renders behind compose_story.py are not kept, so this works from the T3
   * retimes each storyboard segment (story.py durations) by its own factor, blending neighbouring frames;
   * replaces the "working results, not yet published" header label and footer with publication wording and the logo;
   * adds a house-style title card and an end card with sources, caveats and licence.
-Usage: python3 publish_cut.py PART1_ROOT T3_DRAFT.mp4 OUT.mp4 ["PUBLICATION DATE"]
+  * optional (MUSIC=lament.mp3): stretches the film to the CAF lament and lays it underneath;
+  * optional (MEMORIAL=folder with keyed poppy.png, ppcli.png, ler.png): closing memorial card with the four names,
+    carrying the last 15 s of the lament, then 4 s of silence. The badge and poppy images are not kept in this repo.
+Usage: [MUSIC=...] [MEMORIAL=...] python3 publish_cut.py PART1_ROOT T3_DRAFT.mp4 OUT.mp4 ["PUBLICATION DATE"]
 """
 import sys, os, subprocess, math
 import numpy as np, cv2
 from PIL import Image, ImageDraw, ImageFont
 P1, SRC, OUT = sys.argv[1:4]; PUB = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else ""
 MUSIC = os.environ.get("MUSIC")          # optional: lament audio; the film is stretched to its length
+MEMORIAL = os.environ.get("MEMORIAL")    # optional: folder with keyed poppy.png, ppcli.png, ler.png (not kept in this repo)
+MEM_MUSIC, MEM_SIL = 15.0, 4.0           # memorial card: last 15 s of the lament, then silence before black
 M_IN, M_OUT = float(os.environ.get("M_IN", 27.8)), float(os.environ.get("M_OUT", 215.5))   # music section of the file (s)
 TITLE_S, M_LEAD, TAIL = 6.0, 1.0, 2.5
 F = "/usr/share/fonts/opentype/inter/"
@@ -28,8 +33,12 @@ SEG = [(0, 4, 1.6), (4, 6, 1.3), (6, 9.5, 1.5), (9.5, 11.5, 1.3), (11.5, 15, 1.6
 MOVES = {1, 3, 11, 13}   # camera moves: keep near their own pace
 END_S = 9.0
 if MUSIC:   # stretch the static and clock segments so title + film + end card = the lament (music starts M_LEAD s in)
-    total = M_LEAD + (M_OUT - M_IN) + TAIL; END_S = 16.0
-    film = total - TITLE_S - END_S - 3 * 14 / 24 - 12 / 24
+    if MEMORIAL:   # the memorial card carries the last phrase of the lament, then holds in silence
+        END_S = 13.0; total = M_LEAD + (M_OUT - M_IN) + MEM_SIL + 12 / 24
+        film = M_LEAD + (M_OUT - M_IN) - MEM_MUSIC - (TITLE_S - 0.5) - 14 / 24 - END_S - 2 * 14 / 24
+    else:
+        total = M_LEAD + (M_OUT - M_IN) + TAIL; END_S = 16.0
+        film = total - TITLE_S - END_S - 3 * 14 / 24 - 12 / 24
     fixed = sum((b - a) * k for i, (a, b, k) in enumerate(SEG) if i in MOVES); var = sum((b - a) * k for i, (a, b, k) in enumerate(SEG) if i not in MOVES)
     sc = (film - fixed) / var; SEG = [(a, b, k if i in MOVES else k * sc) for i, (a, b, k) in enumerate(SEG)]
     print(f"stretch x{sc:.2f} on static segments, film {film:.1f} s, total {total:.1f} s")
@@ -86,6 +95,31 @@ def end(im, d):
     d.text((90, H - 60), "PRIME ROGUE", font=K(38), fill=GOLD)
     im.paste(LOGO.resize((150, 150)), (W - 230, H - 185))
 
+NAMES = [("Sgt. Morgan Wong", "The Loyal Edmonton Regiment, serving with 3rd Battalion, PPCLI"),
+         ("Pte. Shaun Farrell", "3rd Battalion, Princess Patricia's Canadian Light Infantry"),
+         ("Pte. Aidan Goulding", "3rd Battalion, Princess Patricia's Canadian Light Infantry"),
+         ("Pte. Hayden Lykkemark", "3rd Battalion, Princess Patricia's Canadian Light Infantry")]
+def memorial_layers():
+    """Base card (poppy, Lest We Forget, crests, date) and one RGBA layer per name, for sequential fade-ins."""
+    def asset(n, hgt):
+        im = Image.open(os.path.join(MEMORIAL, n)).convert("RGBA"); im = im.crop(im.split()[-1].point(lambda v: 255 if v > 40 else 0).getbbox())
+        return im.resize((round(im.width * hgt / im.height), hgt), Image.LANCZOS)
+    base = Image.new("RGBA", (W, H), BG + (255,)); d = ImageDraw.Draw(base)
+    pop = asset("poppy.png", 200); base.alpha_composite(pop, ((W - pop.width) // 2, 70))
+    d.text((W // 2, 335), "Lest We Forget", font=D(76), fill=CREAM, anchor="mm")
+    d.rectangle([W // 2 - 90, 392, W // 2 + 90, 395], fill=GOLD)
+    for n, x in (("ppcli.png", 250), ("ler.png", W - 250)):
+        c = asset(n, 300); base.alpha_composite(c, (x - c.width // 2, 470))
+    d.text((W // 2, 905), "October 17, 2026  ·  CFB Wainwright", font=M(34), fill=GOLD, anchor="mm")
+    d.text((W // 2, H - 42), "Badges and poppy shown in remembrance. No endorsement by DND, the regiments or the Royal Canadian Legion is implied.",
+           font=R(20), fill=MUTED, anchor="mm")
+    layers = []
+    for i, (nm, unit) in enumerate(NAMES):
+        L = Image.new("RGBA", (W, H), (0, 0, 0, 0)); dl = ImageDraw.Draw(L); y = 455 + i * 105
+        dl.text((W // 2, y), nm, font=B(46), fill=CREAM, anchor="mm"); dl.text((W // 2, y + 42), unit, font=R(25), fill=MUTED, anchor="mm")
+        layers.append(np.asarray(L, np.float32))
+    return np.asarray(base.convert("RGB"), np.float32), layers
+NAME_T0, NAME_DT, NAME_FADE = 1.2, 2.2, 1.4
 
 # ---- the figures at Range 2: when the fire reaches them they fade under a smoke veil instead of standing in the flames
 # (the model can't show what happened to anyone). Draft-time schedule from story.py's shot C tmap: 3:39 = 49.4 s, 3:42 = 53.1 s.
@@ -178,11 +212,22 @@ for j in range(nout):
         fr = a * (1 - q) + b * q
     if first is None: first = fr; fade(T.astype(np.float32), fr, 14)
     emit(fr); last = fr
-E = card(end); fade(last, E.astype(np.float32), 14); emit(E, int(END_S * FPS)); fade(E.astype(np.float32), black, 12)
+E = card(end); fade(last, E.astype(np.float32), 14); emit(E, int(END_S * FPS))
+if MEMORIAL:
+    MB, ML = memorial_layers(); fade(E.astype(np.float32), MB, 14)
+    for j in range(int((MEM_MUSIC + MEM_SIL) * FPS)):
+        t = j / FPS; fr = MB.copy()
+        for i, L in enumerate(ML):
+            k = min(1.0, max(0.0, (t - NAME_T0 - i * NAME_DT) / NAME_FADE)); k = k * k * (3 - 2 * k)
+            if k > 0: al = L[..., 3:4] / 255 * k; fr = fr * (1 - al) + L[..., :3] * al
+        emit(fr); last = fr
+    fade(last, black, 12)
+else:
+    fade(E.astype(np.float32), black, 12)
 w.close(); out.wait(); print("wrote", OUT, f"{DUR:.1f} s of film + cards")
 if MUSIC:   # lay the lament under the film: music from M_LEAD s, loudness-normalized, gentle fade at the end
     tmp = OUT[:-4] + "_silent.mp4"; os.replace(OUT, tmp)
-    af = (f"atrim={M_IN}:{M_OUT},asetpts=PTS-STARTPTS,afade=t=in:d=0.8,afade=t=out:st={M_OUT - M_IN - 4}:d=4,"
+    af = (f"atrim={M_IN}:{M_OUT},asetpts=PTS-STARTPTS,afade=t=in:d=0.8,afade=t=out:st={M_OUT - M_IN - 3}:d=3,"
           f"loudnorm=I=-18:TP=-1.5:LRA=11,adelay={int(M_LEAD * 1000)}|{int(M_LEAD * 1000)},apad")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp, "-i", MUSIC, "-filter_complex", f"[1:a]{af}[a]", "-map", "0:v", "-map", "[a]",
                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", OUT], check=True)
