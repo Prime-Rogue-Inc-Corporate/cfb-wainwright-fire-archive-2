@@ -1,0 +1,36 @@
+{
+ "1732": {
+  "moment": "STAR03 drops below coverage, ingress",
+  "cells_by_state": {
+   "cooling >90 min": 5057,
+   "smouldering 30-90 min": 2901,
+   "flaming <30 min": 175
+  }
+ },
+ "1737": {
+  "moment": "STAR03 estimated landing at Wainwright Airport",
+  "cells_by_state": {
+   "cooling >90 min": 5427,
+   "smouldering 30-90 min": 2567,
+   "flaming <30 min": 169
+  }
+ },
+ "2140": {
+  "moment": "STAR03 first egress",
+  "cells_by_state": {
+   "cooling >90 min": 8298,
+   "smouldering 30-90 min": 0,
+   "flaming <30 min": 0
+  }
+ },
+ "0210": {
+  "moment": "STAR03 second egress (Oct. 18)",
+  "cells_by_state": {
+   "cooling >90 min": 8298,
+   "smouldering 30-90 min": 0,
+   "flaming <30 min": 0
+  }
+ },
+ "latest_arrival_min_after_1500": 209.875,
+ "burned_km2": 13.28
+}

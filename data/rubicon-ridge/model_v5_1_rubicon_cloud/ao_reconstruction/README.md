@@ -32,3 +32,34 @@ Contains modified Copernicus Sentinel data (2026). Copernicus DEM © DLR e.V. 20
 ## Scripts
 
 `scripts/rubicon_ridge/model_v5_1/ao/`: `ao_mosaic.py` (corridor and detail mosaics), `ao_median.py` (median composite), `ao_dem.py` (terrain).
+
+## Added Nov. 7: the live environment around the burn
+
+### `burn_from_model_v5/`: the fire, from our own model (not from any image)
+
+The film shows the burn and its state from **Rubicon Ridge v5** (weighted median of the fitted runs), because it is our inference. It's on the v5 grid (EPSG:3400, 40 m).
+
+| File | What |
+|---|---|
+| `arrival_min_after_1500_v5median.tif` | When the model's fire reached each cell, in minutes after 3:00 p.m. MDT. Cells burning before the front are -60. Blank where fewer than half the runs burn the cell. |
+| `burn_probability_v5.tif` | The weighted share of runs that burn each cell |
+| `burn_perimeter_v5.geojson` | The model's burn outline: 13.3 km² |
+| `burn_state_1732.tif`, `_1737`, `_2140`, `_0210` | The fire's state at each film moment (STAR03's ingress, its landing, the first egress, the second egress). 1 = burned more than 90 minutes earlier (cooling); 2 = 30–90 minutes (smouldering); 3 = less than 30 minutes (flaming edge). |
+| `burn_state_summary.json` | Cell counts by state |
+
+What the model implies for the crew:
+- **At 5:37 p.m.:** most of the burn was 30–90+ minutes old. About 170 cells (roughly 0.3 km²) at the latest-burning edges were still within 30 minutes of the flame front, so active fire and smoke were plausibly visible from the approach.
+- **By 9:40 p.m.:** everything the model burns was more than 90 minutes old. Any glow then would be residual smouldering, which the model doesn't simulate.
+
+### `derived_satellogic/`: layout of the scene, traced from the licensed 70 cm image (vectors only)
+
+The image itself is not in this repository. These are generalised, derived vectors for building the 3D scene. Credit: "Derived from imagery by Satellogic via SkyFi, Oct. 20, 2026".
+
+| File | What |
+|---|---|
+| `landcover_generalised_3400.geojson` | Eight generalised surface classes, about 14 m detail with a 0.05 ha minimum: trees and shrubs (with and without leaves), open grass or field, green grass, lawn or conifer, dry slough or alkali flat, bare ground, gravel or roof, and "burned". Inside the burn, the film takes the fire's extent and state from model v5, not from this layer. The classes come from an automatic clustering labelled by rule, so treat them as texture guidance, not a survey. |
+| (no buildings layer) | I tried automatic roof detection with shadow heights. It found barely half the houses in the country-residential area and almost no shadows long enough to measure, so it isn't good enough to publish. For the film, buildings more than 2–3 km from the camera are smaller than a pixel. If we need them, hand-tracing the 30–40 structures that matter (the airport's hangar row, the farmyards on the approach) is the viable route. |
+
+The land-cover clustering and roof-test scripts read the licensed image directly, so, like the earlier Satellogic scripts, they are kept outside the repo.
+
+Coverage is the 6.25 × 6.25 km image footprint: the burn, the ranges, the country-residential area south of the airport, and the airport's southern hangar row. **The runway and most of the apron are outside the image** (north of its edge), so the airport layout still needs another source (open aerial photos or OSM).
